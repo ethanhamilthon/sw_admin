@@ -7,24 +7,30 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"templtest/internal/services"
 
 	"time"
 )
 
 type Server struct {
-	mux *http.ServeMux
+	mux     *http.ServeMux
+	service *services.RegisterService
 }
 
-func New() *Server {
+func New(service *services.RegisterService) *Server {
+	s := &Server{service: service}
+	s.register()
+	return s
+}
+
+func (s *Server) register() {
+	handlers := http.NewServeMux()
 	main := http.NewServeMux()
-	handlers := NewHandlers()
 	fsHandler := http.FileServer(http.Dir("./public"))
 	main.Handle("/public/", http.StripPrefix("/public/", fsHandler))
-	main.HandleFunc("/", handlers.Index)
-	main.HandleFunc("/login", handlers.Login)
-	main.HandleFunc("POST /todos", handlers.CreateTodo)
-	main.HandleFunc("DELETE /todos/{id}", handlers.DeleteTodo)
-	return &Server{mux: main}
+	main.HandleFunc("/", s.index)
+	handlers.Handle("/metrics/", http.StripPrefix("/metrics", main))
+	s.mux = handlers
 }
 
 func (s *Server) Serve() {
@@ -47,17 +53,16 @@ func (s *Server) Serve() {
 		}
 	}()
 
-	select {
-	case <-osSignal:
-		log.Println("Shutdown signal received. Shutting down...")
+	<-osSignal
+	log.Println("Shutdown signal received. Shutting down...")
 
-		// Timeout to close handlers
-		shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 30*time.Second)
-		defer shutdownCancel()
+	// Timeout to close handlers
+	shutdownCtx, shutdownCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer shutdownCancel()
 
-		// Stop the server
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Fatalf("Server shutdown failed: %v", err)
-		}
+	// Stop the server
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("Server shutdown failed: %v", err)
 	}
+
 }
